@@ -9,3 +9,11 @@ export const apiClient = axios.create({
   },
   timeout: 15000,
 })
+
+export function unwrapApiData<T>(payload: T | { data: T }) {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return payload.data
+  }
+
+  return payload
+}

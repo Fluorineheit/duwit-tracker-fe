@@ -182,6 +182,40 @@ a {
   color: #657486;
 }
 
+.category-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 180px;
+}
+
+.category-color-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border: 1px solid #cbd5df;
+  border-radius: 999px;
+}
+
+.category-icon {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  background: #eef3f2;
+  color: #344054;
+  font-weight: 800;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
 .dialog-form {
   display: grid;
   gap: 18px;
@@ -213,6 +247,49 @@ a {
   justify-content: flex-end;
   gap: 10px;
   padding-top: 6px;
+}
+
+.color-control {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.native-color-input {
+  width: 48px;
+  height: 42px;
+  padding: 4px;
+  border: 1px solid #cbd5df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.color-swatch {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px #cbd5df;
+  cursor: pointer;
+}
+
+.color-swatch.is-active {
+  box-shadow:
+    0 0 0 2px #132238,
+    0 0 0 4px #ffffff;
+}
+
+.confirm-copy {
+  margin: 0;
+  color: #344054;
+  line-height: 1.6;
 }
 
 .w-full {

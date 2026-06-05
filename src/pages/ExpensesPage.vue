@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
 import Button from 'primevue/button'
 import Column from 'primevue/column'
@@ -9,11 +9,15 @@ import Dialog from 'primevue/dialog'
 import Dropdown from 'primevue/dropdown'
 import InputNumber from 'primevue/inputnumber'
 import Message from 'primevue/message'
+import ProgressSpinner from 'primevue/progressspinner'
+import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 
 import { getCategories } from '@/api/categories'
 import { createExpense, getExpenses } from '@/api/expenses'
 import type { Category, CreateExpensePayload, Expense } from '@/api/types'
+import { formatDate, formatIDR, toDateParam } from '@/utils/format'
+import { sourceBadge } from '@/utils/expenseSource'
 
 interface ExpenseForm {
   categoryId: string | null
@@ -22,13 +26,23 @@ interface ExpenseForm {
   spentAt: Date | null
 }
 
+const PAGE_SIZE = 10
+
 const expenses = ref<Expense[]>([])
 const categories = ref<Category[]>([])
+const cursor = ref<string | null>(null)
+const hasMore = ref(true)
+
 const isLoading = ref(false)
+const isLoadingMore = ref(false)
 const isSaving = ref(false)
 const isDialogVisible = ref(false)
 const errorMessage = ref('')
 const formError = ref('')
+
+// Filters
+const filterCategoryId = ref<string | null>(null)
+const filterDateRange = ref<Array<Date | null> | null>(null)
 
 const form = reactive<ExpenseForm>({
   categoryId: null,
@@ -37,27 +51,14 @@ const form = reactive<ExpenseForm>({
   spentAt: new Date(),
 })
 
-const rupiahFormatter = new Intl.NumberFormat('id-ID', {
-  style: 'currency',
-  currency: 'IDR',
-  maximumFractionDigits: 0,
-})
-
-const dateFormatter = new Intl.DateTimeFormat('id-ID', {
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-})
+const sentinel = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | null = null
 
 const categoryOptions = computed(() =>
   categories.value.map((category) => ({
     label: category.name,
     value: category.id,
   })),
-)
-
-const totalAmount = computed(() =>
-  expenses.value.reduce((total, expense) => total + Number(expense.amount), 0),
 )
 
 const isCreateDisabled = computed(
@@ -76,12 +77,77 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback
 }
 
-function formatAmount(amount: number) {
-  return rupiahFormatter.format(Number(amount))
+function buildListParams() {
+  const params: Record<string, string | number | null> = {
+    cursor: cursor.value,
+    limit: PAGE_SIZE,
+  }
+
+  if (filterCategoryId.value) {
+    params.category_id = filterCategoryId.value
+  }
+
+  const range = filterDateRange.value
+  if (range?.[0]) {
+    params.from = toDateParam(range[0])
+  }
+  if (range?.[1]) {
+    params.to = toDateParam(range[1])
+  }
+
+  return params
 }
 
-function formatSpentDate(spentAt: string) {
-  return dateFormatter.format(new Date(spentAt))
+/** Load the next page of expenses. Appends unless this is the first page. */
+async function loadExpenses() {
+  if (!hasMore.value || isLoadingMore.value) return
+
+  const isFirstPage = cursor.value === null
+
+  if (isFirstPage) {
+    isLoading.value = true
+    errorMessage.value = ''
+  } else {
+    isLoadingMore.value = true
+  }
+
+  try {
+    const result = await getExpenses(buildListParams())
+    expenses.value.push(...result.items)
+    cursor.value = result.next_cursor
+    hasMore.value = result.has_more
+  } catch (error) {
+    errorMessage.value = getErrorMessage(error, 'Failed to load expenses.')
+    hasMore.value = false
+  } finally {
+    isLoading.value = false
+    isLoadingMore.value = false
+  }
+}
+
+/** Reset pagination and reload from the first page (used on filter change/create). */
+async function reloadFromStart() {
+  expenses.value = []
+  cursor.value = null
+  hasMore.value = true
+  await loadExpenses()
+
+  // Re-kick the observer in case the fresh (short) list keeps the sentinel in view.
+  if (hasMore.value && observer && sentinel.value) {
+    observer.unobserve(sentinel.value)
+    observer.observe(sentinel.value)
+  }
+}
+
+async function loadCategories() {
+  try {
+    categories.value = await getCategories({ type: 'expense' })
+    if (!form.categoryId) {
+      form.categoryId = categories.value[0]?.id ?? null
+    }
+  } catch (error) {
+    errorMessage.value = getErrorMessage(error, 'Failed to load categories.')
+  }
 }
 
 function resetForm() {
@@ -107,29 +173,6 @@ function toSpentAtPayload(date: Date) {
   return localNoon.toISOString()
 }
 
-async function loadData() {
-  isLoading.value = true
-  errorMessage.value = ''
-
-  try {
-    const [expenseResult, categoryResult] = await Promise.all([
-      getExpenses({ limit: 100, offset: 0 }),
-      getCategories({ type: 'expense' }),
-    ])
-
-    expenses.value = expenseResult.items
-    categories.value = categoryResult
-
-    if (!form.categoryId) {
-      form.categoryId = categoryResult[0]?.id ?? null
-    }
-  } catch (error) {
-    errorMessage.value = getErrorMessage(error, 'Failed to load expenses.')
-  } finally {
-    isLoading.value = false
-  }
-}
-
 async function handleCreateExpense() {
   formError.value = ''
 
@@ -147,7 +190,6 @@ async function handleCreateExpense() {
   }
 
   const note = form.note.trim()
-
   if (note) {
     payload.note = note
   }
@@ -158,7 +200,7 @@ async function handleCreateExpense() {
     await createExpense(payload)
     isDialogVisible.value = false
     resetForm()
-    await loadData()
+    await reloadFromStart()
   } catch (error) {
     formError.value = getErrorMessage(error, 'Failed to create expense.')
   } finally {
@@ -166,8 +208,55 @@ async function handleCreateExpense() {
   }
 }
 
-onMounted(() => {
-  void loadData()
+// Reset and reload whenever a filter changes.
+watch(
+  [filterCategoryId, filterDateRange],
+  () => {
+    void reloadFromStart()
+  },
+  { deep: true },
+)
+
+/**
+ * Called whenever the sentinel scrolls into view. After loading a page we
+ * re-observe the sentinel so the observer re-emits its current state — without
+ * this, a sentinel that stays visible (list still shorter than the viewport)
+ * would never fire again and pagination would stall before reaching the end.
+ */
+async function onSentinelVisible() {
+  if (!hasMore.value || isLoadingMore.value || isLoading.value) return
+
+  await loadExpenses()
+
+  if (hasMore.value && observer && sentinel.value) {
+    observer.unobserve(sentinel.value)
+    observer.observe(sentinel.value)
+  }
+}
+
+onMounted(async () => {
+  await loadCategories()
+  await reloadFromStart()
+
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0]?.isIntersecting) {
+        void onSentinelVisible()
+      }
+    },
+    // Prefetch a full viewport ahead so the next page is usually ready
+    // before the user scrolls to it (no visible loading pop-in).
+    { rootMargin: '100% 0px' },
+  )
+
+  if (sentinel.value) {
+    observer.observe(sentinel.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  observer = null
 })
 </script>
 
@@ -194,7 +283,13 @@ onMounted(() => {
     <Message v-if="errorMessage" severity="error" class="state-message" :closable="false">
       <div class="error-inline">
         <span>{{ errorMessage }}</span>
-        <Button label="Retry" icon="pi pi-refresh" size="small" severity="danger" @click="loadData" />
+        <Button
+          label="Retry"
+          icon="pi pi-refresh"
+          size="small"
+          severity="danger"
+          @click="reloadFromStart"
+        />
       </div>
     </Message>
 
@@ -202,9 +297,29 @@ onMounted(() => {
       <div class="panel-toolbar">
         <div>
           <h2 id="expenses-table-title" class="panel-title">Expense list</h2>
-          <p class="panel-meta">
-            {{ expenses.length }} records - {{ formatAmount(totalAmount) }} total
-          </p>
+          <p class="panel-meta">{{ expenses.length }} loaded</p>
+        </div>
+
+        <div class="panel-filters">
+          <Dropdown
+            v-model="filterCategoryId"
+            :options="categoryOptions"
+            option-label="label"
+            option-value="value"
+            placeholder="All categories"
+            show-clear
+            class="filter-control"
+          />
+          <DatePicker
+            v-model="filterDateRange"
+            selection-mode="range"
+            :manual-input="false"
+            show-icon
+            show-button-bar
+            date-format="dd M yy"
+            placeholder="Date range"
+            class="filter-control"
+          />
         </div>
       </div>
 
@@ -212,20 +327,12 @@ onMounted(() => {
         :value="expenses"
         data-key="id"
         :loading="isLoading"
-        paginator
-        :rows="10"
-        :rows-per-page-options="[10, 25, 50]"
         striped-rows
         responsive-layout="scroll"
       >
-        <Column field="spent_at" header="Spent Date" sortable>
+        <Column field="spent_at" header="Spent Date">
           <template #body="{ data }">
-            <span>{{ formatSpentDate(data.spent_at) }}</span>
-          </template>
-        </Column>
-        <Column field="category_name" header="Category" sortable>
-          <template #body="{ data }">
-            <span>{{ data.category_name ?? 'Uncategorized' }}</span>
+            <span>{{ formatDate(data.spent_at) }}</span>
           </template>
         </Column>
         <Column field="note" header="Note">
@@ -233,15 +340,30 @@ onMounted(() => {
             <span :class="{ 'muted-cell': !data.note }">{{ data.note ?? 'No note' }}</span>
           </template>
         </Column>
-        <Column field="amount" header="Amount" sortable>
+        <Column field="category_name" header="Category">
           <template #body="{ data }">
-            <span class="amount-cell">{{ formatAmount(data.amount) }}</span>
+            <span>{{ data.category_name ?? 'Uncategorized' }}</span>
+          </template>
+        </Column>
+        <Column field="source" header="Source">
+          <template #body="{ data }">
+            <Tag :value="sourceBadge(data.source).label" :severity="sourceBadge(data.source).severity" />
+          </template>
+        </Column>
+        <Column field="amount" header="Amount">
+          <template #body="{ data }">
+            <span class="amount-cell">{{ formatIDR(data.amount) }}</span>
           </template>
         </Column>
         <template #empty>
           <div class="table-empty">No expenses yet.</div>
         </template>
       </DataTable>
+
+      <div ref="sentinel" class="scroll-sentinel">
+        <ProgressSpinner v-if="isLoadingMore" style="width: 32px; height: 32px" stroke-width="4" />
+        <span v-else-if="!hasMore && expenses.length" class="scroll-end">End of list</span>
+      </div>
     </section>
 
     <Dialog
@@ -336,3 +458,28 @@ onMounted(() => {
     </Dialog>
   </section>
 </template>
+
+<style scoped>
+.panel-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.filter-control {
+  min-width: 200px;
+}
+
+.scroll-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0.75rem;
+}
+
+.scroll-end {
+  color: var(--p-text-muted-color, #94a3b8);
+  font-size: 0.85rem;
+}
+</style>

@@ -3,25 +3,64 @@ import type {
   ApiResponse,
   Category,
   CreateCategoryPayload,
+  ListCategoriesResult,
   UpdateCategoryPayload,
 } from './types'
 
-type CategoriesPayload = Category[] | { categories?: Category[] }
-
-function normalizeCategories(payload: CategoriesPayload) {
-  if (Array.isArray(payload)) {
-    return payload
-  }
-
-  return payload.categories ?? []
+export interface GetCategoriesParams {
+  type?: 'expense' | 'income'
+  limit?: number
+  cursor?: string | null
 }
 
-export async function getCategories(params: { type?: 'expense' | 'income' } = {}) {
-  const response = await apiClient.get<ApiResponse<CategoriesPayload> | CategoriesPayload>('/categories', {
-    params,
-  })
+type CategoriesPayload =
+  | Category[]
+  | {
+      items?: Category[]
+      categories?: Category[]
+      next_cursor?: string | null
+      has_more?: boolean
+      limit?: number
+    }
 
-  return normalizeCategories(unwrapApiData<CategoriesPayload>(response.data))
+function normalizeCategoriesResult(
+  payload: CategoriesPayload,
+  params: GetCategoriesParams,
+): ListCategoriesResult {
+  if (Array.isArray(payload)) {
+    return { items: payload, next_cursor: null, has_more: false, limit: params.limit ?? payload.length }
+  }
+
+  const items = payload.items ?? payload.categories ?? []
+
+  return {
+    items,
+    next_cursor: payload.next_cursor ?? null,
+    has_more: payload.has_more ?? false,
+    limit: payload.limit ?? params.limit ?? items.length,
+  }
+}
+
+/** Cursor-paginated category list (used by the Categories page infinite scroll). */
+export async function listCategories(
+  params: GetCategoriesParams = {},
+): Promise<ListCategoriesResult> {
+  const response = await apiClient.get<ApiResponse<CategoriesPayload> | CategoriesPayload>(
+    '/categories',
+    {
+      params: { limit: 10, ...params },
+    },
+  )
+
+  return normalizeCategoriesResult(unwrapApiData<CategoriesPayload>(response.data), params)
+}
+
+/** Flat category list (used by dropdowns and the dashboard). */
+export async function getCategories(
+  params: { type?: 'expense' | 'income'; limit?: number } = {},
+) {
+  const result = await listCategories({ limit: 100, ...params })
+  return result.items
 }
 
 export async function createCategory(payload: CreateCategoryPayload) {

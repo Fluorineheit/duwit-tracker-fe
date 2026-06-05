@@ -34,9 +34,32 @@ export interface Expense {
 
 export interface ListExpensesResult {
   items: Expense[]
-  total: number
+  next_cursor: string | null
+  has_more: boolean
   limit: number
-  offset: number
+}
+
+export interface ListCategoriesResult {
+  items: Category[]
+  next_cursor: string | null
+  has_more: boolean
+  limit: number
+}
+
+export interface DailyReportItem {
+  date: string
+  total: number
+}
+
+export interface MonthlyReportItem {
+  month: string
+  total: number
+}
+
+export interface CategoryReportItem {
+  category_id: string | null
+  category_name: string | null
+  total: number
 }
 
 export interface CreateExpensePayload {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { isAxiosError } from 'axios'
 import Button from 'primevue/button'
 import Column from 'primevue/column'
@@ -8,6 +8,7 @@ import Dialog from 'primevue/dialog'
 import Dropdown from 'primevue/dropdown'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
+import ProgressSpinner from 'primevue/progressspinner'
 import SelectButton from 'primevue/selectbutton'
 import Tag from 'primevue/tag'
 import Tooltip from 'primevue/tooltip'
@@ -15,7 +16,7 @@ import Tooltip from 'primevue/tooltip'
 import {
   createCategory,
   deleteCategory,
-  getCategories,
+  listCategories,
   updateCategory,
 } from '@/api/categories'
 import type { Category, CreateCategoryPayload, UpdateCategoryPayload } from '@/api/types'
@@ -48,7 +49,15 @@ const colorSwatches = [
 
 const vTooltip = Tooltip
 
+const PAGE_SIZE = 10
+
 const categories = ref<Category[]>([])
+const cursor = ref<string | null>(null)
+const hasMore = ref(true)
+const isLoadingMore = ref(false)
+const sentinel = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | null = null
+
 const activeType = ref<CategoryType>('expense')
 const dialogMode = ref<DialogMode>('create')
 const selectedCategory = ref<Category | null>(null)
@@ -176,16 +185,60 @@ function buildPayload(): CreateCategoryPayload | UpdateCategoryPayload {
   return payload
 }
 
+/** Load the next page of categories. Appends unless this is the first page. */
 async function loadCategories() {
-  isLoading.value = true
-  errorMessage.value = ''
+  if (!hasMore.value || isLoadingMore.value) return
+
+  const isFirstPage = cursor.value === null
+
+  if (isFirstPage) {
+    isLoading.value = true
+    errorMessage.value = ''
+  } else {
+    isLoadingMore.value = true
+  }
 
   try {
-    categories.value = await getCategories()
+    const result = await listCategories({ cursor: cursor.value, limit: PAGE_SIZE })
+    categories.value.push(...result.items)
+    cursor.value = result.next_cursor
+    hasMore.value = result.has_more
   } catch (error) {
     errorMessage.value = getErrorMessage(error, 'Failed to load categories.')
+    hasMore.value = false
   } finally {
     isLoading.value = false
+    isLoadingMore.value = false
+  }
+}
+
+/** Reset pagination and reload from the first page (after create/edit/delete). */
+async function reloadFromStart() {
+  categories.value = []
+  cursor.value = null
+  hasMore.value = true
+  await loadCategories()
+
+  // Re-kick the observer in case the fresh (short) list keeps the sentinel in view.
+  if (hasMore.value && observer && sentinel.value) {
+    observer.unobserve(sentinel.value)
+    observer.observe(sentinel.value)
+  }
+}
+
+/**
+ * Called whenever the sentinel scrolls into view. Re-observing after each load
+ * makes the observer re-emit, so a sentinel that stays visible keeps loading
+ * until the viewport is filled or there are no more pages.
+ */
+async function onSentinelVisible() {
+  if (!hasMore.value || isLoadingMore.value || isLoading.value) return
+
+  await loadCategories()
+
+  if (hasMore.value && observer && sentinel.value) {
+    observer.unobserve(sentinel.value)
+    observer.observe(sentinel.value)
   }
 }
 
@@ -211,7 +264,7 @@ async function handleSaveCategory() {
     activeType.value = form.type
     isCategoryDialogVisible.value = false
     resetForm(form.type)
-    await loadCategories()
+    await reloadFromStart()
   } catch (error) {
     formError.value = getErrorMessage(error, 'Failed to save category.')
   } finally {
@@ -230,7 +283,7 @@ async function handleDeleteCategory() {
   try {
     await deleteCategory(categoryToDelete.value.id)
     closeDeleteDialog()
-    await loadCategories()
+    await reloadFromStart()
   } catch (error) {
     deleteError.value = getErrorMessage(error, 'Failed to delete category.')
   } finally {
@@ -238,8 +291,28 @@ async function handleDeleteCategory() {
   }
 }
 
-onMounted(() => {
-  void loadCategories()
+onMounted(async () => {
+  await reloadFromStart()
+
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0]?.isIntersecting) {
+        void onSentinelVisible()
+      }
+    },
+    // Prefetch a full viewport ahead so the next page is usually ready
+    // before the user scrolls to it (no visible loading pop-in).
+    { rootMargin: '100% 0px' },
+  )
+
+  if (sentinel.value) {
+    observer.observe(sentinel.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  observer = null
 })
 </script>
 
@@ -298,9 +371,6 @@ onMounted(() => {
         :value="filteredCategories"
         data-key="id"
         :loading="isLoading"
-        paginator
-        :rows="10"
-        :rows-per-page-options="[10, 25, 50]"
         striped-rows
         responsive-layout="scroll"
       >
@@ -374,6 +444,11 @@ onMounted(() => {
           <div class="table-empty">No {{ activeType }} categories yet.</div>
         </template>
       </DataTable>
+
+      <div ref="sentinel" class="scroll-sentinel">
+        <ProgressSpinner v-if="isLoadingMore" style="width: 32px; height: 32px" stroke-width="4" />
+        <span v-else-if="!hasMore && categories.length" class="scroll-end">End of list</span>
+      </div>
     </section>
 
     <Dialog
@@ -514,3 +589,18 @@ onMounted(() => {
     </Dialog>
   </section>
 </template>
+
+<style scoped>
+.scroll-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0.75rem;
+}
+
+.scroll-end {
+  color: var(--p-text-muted-color, #94a3b8);
+  font-size: 0.85rem;
+}
+</style>

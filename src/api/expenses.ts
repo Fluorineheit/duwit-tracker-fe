@@ -9,22 +9,14 @@ import type {
 
 export interface GetExpensesParams {
   limit?: number
-  offset?: number
+  cursor?: string | null
   category_id?: string
   from?: string
   to?: string
   search?: string
 }
 
-type ExpensesPayload =
-  | ListExpensesResult
-  | Expense[]
-  | {
-      expenses?: Expense[]
-      total?: number
-      limit?: number
-      offset?: number
-    }
+type ExpensesPayload = ListExpensesResult | Expense[]
 
 function normalizeExpensesResult(
   result: ExpensesPayload,
@@ -33,33 +25,13 @@ function normalizeExpensesResult(
   if (Array.isArray(result)) {
     return {
       items: result,
-      total: result.length,
+      next_cursor: null,
+      has_more: false,
       limit: params.limit ?? result.length,
-      offset: params.offset ?? 0,
     }
   }
 
-  if ('items' in result) {
-    return result
-  }
-
-  if ('expenses' in result) {
-    const items = result.expenses ?? []
-
-    return {
-      items,
-      total: result.total ?? items.length,
-      limit: result.limit ?? params.limit ?? items.length,
-      offset: result.offset ?? params.offset ?? 0,
-    }
-  }
-
-  return {
-    items: [],
-    total: 0,
-    limit: params.limit ?? 0,
-    offset: params.offset ?? 0,
-  }
+  return result
 }
 
 export async function getExpenses(params: GetExpensesParams = {}) {

@@ -62,6 +62,29 @@ export interface CategoryReportItem {
   total: number
 }
 
+export interface Budget {
+  id: string
+  user_id: string
+  category_id: string | null
+  category_name: string | null
+  amount: number
+  currency: string
+  month: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ListBudgetsResult {
+  items: Budget[]
+}
+
+export interface CreateBudgetPayload {
+  category_id: string
+  amount: number
+  currency?: string
+  month: string
+}
+
 export interface CreateExpensePayload {
   category_id?: string
   amount: number

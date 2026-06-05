@@ -38,3 +38,22 @@ export function monthStartISO(): string {
 export function todayISO(): string {
   return toDateParam(new Date())
 }
+
+/** First and last day of the given date's month as YYYY-MM-DD strings. */
+export function monthRange(date: Date): { start: string; end: string } {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1)
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0)
+  return { start: toDateParam(start), end: toDateParam(end) }
+}
+
+/** First day of the given date's month as YYYY-MM-DD (used for the budget `month` field). */
+export function firstOfMonthParam(date: Date): string {
+  return toDateParam(new Date(date.getFullYear(), date.getMonth(), 1))
+}
+
+const monthFormatter = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' })
+
+/** Format an ISO/RFC3339 timestamp as a month + year label, e.g. "Juni 2026". */
+export function formatMonth(iso: string): string {
+  return monthFormatter.format(new Date(iso))
+}

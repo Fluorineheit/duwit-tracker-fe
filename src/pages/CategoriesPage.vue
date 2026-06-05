@@ -47,6 +47,15 @@ const colorSwatches = [
   '#64748b',
 ]
 
+// Curated emoji palette for category icons (each is at most 2 code points).
+const categoryEmojis = [
+  '🛒', '🍔', '☕', '🍽️', '🍺', '🛍️',
+  '🏠', '💡', '🧾', '💳', '💰', '📱',
+  '🚗', '⛽', '🚌', '✈️', '🏥', '💊',
+  '🏋️', '🎮', '🎬', '📚', '👕', '🎁',
+  '❤️', '🐱', '🎓', '💼', '✂️', '⭐',
+]
+
 const vTooltip = Tooltip
 
 const PAGE_SIZE = 10
@@ -157,12 +166,22 @@ function chooseSwatch(color: string) {
   form.color = color
 }
 
+function chooseEmoji(emoji: string) {
+  // Toggle off if the same emoji is tapped again.
+  form.icon = form.icon === emoji ? '' : emoji
+}
+
 function formatUpdatedDate(updatedAt: string) {
   return dateFormatter.format(new Date(updatedAt))
 }
 
 function isPrimeIcon(icon: string | null) {
   return icon?.startsWith('pi ') ?? false
+}
+
+/** Treat short, non-prefixed strings as emoji; legacy icon names are longer. */
+function isEmojiIcon(icon: string | null) {
+  return !!icon && !isPrimeIcon(icon) && [...icon].length <= 2
 }
 
 function buildPayload(): CreateCategoryPayload | UpdateCategoryPayload {
@@ -374,7 +393,7 @@ onBeforeUnmount(() => {
         striped-rows
         responsive-layout="scroll"
       >
-        <Column field="name" header="Name" sortable>
+        <Column field="name" header="Name">
           <template #body="{ data }">
             <div class="category-name-cell">
               <span
@@ -384,13 +403,14 @@ onBeforeUnmount(() => {
               ></span>
               <span class="category-icon" aria-hidden="true">
                 <i v-if="isPrimeIcon(data.icon)" :class="data.icon"></i>
-                <span v-else>{{ data.icon ?? '-' }}</span>
+                <span v-else-if="isEmojiIcon(data.icon)">{{ data.icon }}</span>
+                <span v-else class="muted-cell">–</span>
               </span>
               <span>{{ data.name }}</span>
             </div>
           </template>
         </Column>
-        <Column field="type" header="Type" sortable>
+        <Column field="type" header="Type">
           <template #body="{ data }">
             <Tag
               :value="data.type === 'expense' ? 'Expense' : 'Income'"
@@ -406,7 +426,7 @@ onBeforeUnmount(() => {
             />
           </template>
         </Column>
-        <Column field="updated_at" header="Updated" sortable>
+        <Column field="updated_at" header="Updated">
           <template #body="{ data }">
             <span class="muted-cell">
               {{ formatUpdatedDate(data.updated_at) }}
@@ -454,6 +474,7 @@ onBeforeUnmount(() => {
     <Dialog
       v-model:visible="isCategoryDialogVisible"
       modal
+      dismissable-mask
       :header="dialogTitle"
       :style="{ width: 'min(560px, calc(100vw - 32px))' }"
     >
@@ -473,29 +494,44 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <div class="form-grid">
-          <div class="field">
-            <label for="category-type">Type</label>
-            <Dropdown
-              id="category-type"
-              v-model="form.type"
-              class="w-full"
-              :options="categoryTypes"
-              option-label="label"
-              option-value="value"
+        <div class="field">
+          <label for="category-type">Type</label>
+          <Dropdown
+            id="category-type"
+            v-model="form.type"
+            class="w-full"
+            :options="categoryTypes"
+            option-label="label"
+            option-value="value"
+            :disabled="isSaving"
+          />
+        </div>
+
+        <div class="field">
+          <div class="icon-label-row">
+            <label>Icon</label>
+            <Button
+              v-if="form.icon"
+              type="button"
+              label="Clear"
+              size="small"
+              text
               :disabled="isSaving"
+              @click="form.icon = ''"
             />
           </div>
-
-          <div class="field">
-            <label for="category-icon">Icon</label>
-            <InputText
-              id="category-icon"
-              v-model="form.icon"
-              class="w-full"
-              placeholder="pi pi-shopping-cart"
+          <div class="emoji-swatches" aria-label="Category icon emojis">
+            <button
+              v-for="emoji in categoryEmojis"
+              :key="emoji"
+              type="button"
+              class="emoji-swatch"
+              :class="{ 'is-active': form.icon === emoji }"
               :disabled="isSaving"
-            />
+              @click="chooseEmoji(emoji)"
+            >
+              {{ emoji }}
+            </button>
           </div>
         </div>
 
@@ -555,6 +591,7 @@ onBeforeUnmount(() => {
     <Dialog
       v-model:visible="isDeleteDialogVisible"
       modal
+      dismissable-mask
       header="Delete Category"
       :style="{ width: 'min(460px, calc(100vw - 32px))' }"
     >
@@ -602,5 +639,46 @@ onBeforeUnmount(() => {
 .scroll-end {
   color: var(--p-text-muted-color, #94a3b8);
   font-size: 0.85rem;
+}
+
+.icon-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.emoji-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.emoji-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font-size: 1.25rem;
+  line-height: 1;
+  border: 1px solid var(--p-content-border-color, #cbd5df);
+  border-radius: 8px;
+  background: var(--p-content-background, #ffffff);
+  cursor: pointer;
+}
+
+.emoji-swatch:hover:not(:disabled) {
+  border-color: #116466;
+}
+
+.emoji-swatch.is-active {
+  border-color: #116466;
+  box-shadow: 0 0 0 2px rgba(17, 100, 102, 0.35);
+}
+
+.emoji-swatch:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 </style>

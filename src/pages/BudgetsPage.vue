@@ -333,6 +333,7 @@ onMounted(() => {
     <Dialog
       v-model:visible="isDialogVisible"
       modal
+      dismissable-mask
       header="Add Budget"
       :style="{ width: 'min(520px, calc(100vw - 32px))' }"
     >
@@ -412,6 +413,7 @@ onMounted(() => {
     <Dialog
       v-model:visible="isDeleteDialogVisible"
       modal
+      dismissable-mask
       header="Delete Budget"
       :style="{ width: 'min(460px, calc(100vw - 32px))' }"
     >

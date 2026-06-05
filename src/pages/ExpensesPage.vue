@@ -369,6 +369,7 @@ onBeforeUnmount(() => {
     <Dialog
       v-model:visible="isDialogVisible"
       modal
+      dismissable-mask
       header="Add Expense"
       :style="{ width: 'min(560px, calc(100vw - 32px))' }"
     >
